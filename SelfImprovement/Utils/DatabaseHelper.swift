@@ -75,10 +75,22 @@ class DatabaseHelper {
         )
         """
         
+        let createCustomActivityTypeTable = """
+        CREATE TABLE IF NOT EXISTS custom_activity_type (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE,
+            original_type TEXT,
+            icon_path TEXT,
+            color TEXT,
+            created_at REAL
+        )
+        """
+        
         executeQuery(createHealthStatusTable)
         executeQuery(createAppUsageTable)
         executeQuery(createActivityRecordTable)
         executeQuery(createVideoRecordTable)
+        executeQuery(createCustomActivityTypeTable)
     }
     
     private func executeQuery(_ query: String) {
@@ -440,6 +452,113 @@ class DatabaseHelper {
             sqlite3_finalize(statement)
         }
         return records
+    }
+    
+    // MARK: - Custom Activity Type
+    
+    func addCustomActivityType(_ type: CustomActivityType) -> Int64 {
+        let query = """
+        INSERT OR REPLACE INTO custom_activity_type (name, original_type, icon_path, color, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, type.name, -1, nil)
+            
+            if let originalType = type.originalType {
+                sqlite3_bind_text(statement, 2, originalType, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 2)
+            }
+            
+            if let iconPath = type.iconPath {
+                sqlite3_bind_text(statement, 3, iconPath, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 3)
+            }
+            
+            sqlite3_bind_text(statement, 4, type.color, -1, nil)
+            sqlite3_bind_double(statement, 5, type.createdAt)
+            
+            if sqlite3_step(statement) == SQLITE_DONE {
+                let id = sqlite3_last_insert_rowid(db)
+                sqlite3_finalize(statement)
+                return id
+            }
+            sqlite3_finalize(statement)
+        }
+        return 0
+    }
+    
+    func getAllCustomActivityTypes() -> [CustomActivityType] {
+        var types: [CustomActivityType] = []
+        let query = "SELECT * FROM custom_activity_type ORDER BY created_at DESC"
+        
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = sqlite3_column_int64(statement, 0)
+                let name = String(cString: sqlite3_column_text(statement, 1))
+                
+                var originalType: String?
+                if let originalTypeData = sqlite3_column_text(statement, 2) {
+                    originalType = String(cString: originalTypeData)
+                }
+                
+                var iconPath: String?
+                if let iconPathData = sqlite3_column_text(statement, 3) {
+                    iconPath = String(cString: iconPathData)
+                }
+                
+                let color = String(cString: sqlite3_column_text(statement, 4))
+                let createdAt = sqlite3_column_double(statement, 5)
+                
+                var customType = CustomActivityType(name: name, color: color)
+                customType.id = id
+                customType.originalType = originalType
+                customType.iconPath = iconPath
+                customType.createdAt = createdAt
+                
+                types.append(customType)
+            }
+            sqlite3_finalize(statement)
+        }
+        return types
+    }
+    
+    func deleteCustomActivityType(id: Int64) -> Bool {
+        let query = "DELETE FROM custom_activity_type WHERE id = ?"
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_int64(statement, 1, id)
+            
+            if sqlite3_step(statement) == SQLITE_DONE {
+                sqlite3_finalize(statement)
+                return true
+            }
+            sqlite3_finalize(statement)
+        }
+        return false
+    }
+    
+    func getTodayPositiveActivityCount() -> Int {
+        let today = Date().toString(format: "yyyy-MM-dd")
+        let query = "SELECT COUNT(*) FROM activity_record WHERE date = ?"
+        
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, today, -1, nil)
+            
+            if sqlite3_step(statement) == SQLITE_ROW {
+                let count = Int(sqlite3_column_int(statement, 0))
+                sqlite3_finalize(statement)
+                return count
+            }
+            sqlite3_finalize(statement)
+        }
+        return 0
     }
 }
 

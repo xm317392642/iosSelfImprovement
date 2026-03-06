@@ -9,6 +9,9 @@ import UIKit
 
 class ProfileViewController: UIViewController, UITableViewDelegate, UITableViewDataSource {
     
+    private let dbHelper = DatabaseHelper.shared
+    private let mediaPicker = MediaPickerManager()
+    private let avatarHelper = AvatarHelper.shared
     private let healthScoreRepository = HealthScoreRepository.shared
     
     private let tableView = UITableView()
@@ -18,12 +21,42 @@ class ProfileViewController: UIViewController, UITableViewDelegate, UITableViewD
     private let hundredScoreDaysLabel = UILabel()
     private let totalActivitiesLabel = UILabel()
     
-    private let menuItems = ["个人信息", "日历", "关于我们", "设置"]
+    private let menuItems = ["个人信息", "日历", "紧急联系人", "关于我们", "设置"]
     
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+        setupMediaPicker()
+        loadAvatar()
         updateStats()
+        loadUserName()
+    }
+    
+    private func loadAvatar() {
+        // 从 MMKV 获取头像路径
+        if let photoPath = MMKVUtil.shared.getStringOrNull("user_photo") {
+            if let image = UIImage(contentsOfFile: photoPath) {
+                avatarImageView.image = image
+                return
+            }
+        }
+        
+        // 如果没有头像，使用默认头像
+        if let avatar = avatarHelper.loadAvatar() {
+            avatarImageView.image = avatar
+        } else {
+            avatarImageView.image = avatarHelper.generateDefaultAvatar()
+        }
+    }
+    
+    private func loadUserName() {
+        // 从 MMKV 获取用户名
+        let userName = MMKVUtil.shared.getString("user_nickname", "用户")
+        nameLabel.text = userName
+    }
+    
+    private func setupMediaPicker() {
+        mediaPicker.delegate = self
     }
     
     private func setupUI() {
@@ -128,14 +161,6 @@ class ProfileViewController: UIViewController, UITableViewDelegate, UITableViewD
         ])
     }
     
-    private func updateStats() {
-        let hundredScoreDays = healthScoreRepository.getHundredScoreDaysCount()
-        hundredScoreDaysLabel.text = "\(hundredScoreDays)"
-        
-        // 这里可以添加总活动数的计算
-        totalActivitiesLabel.text = "0"
-    }
-    
     // MARK: - UITableViewDelegate & UITableViewDataSource
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -159,23 +184,103 @@ class ProfileViewController: UIViewController, UITableViewDelegate, UITableViewD
         
         switch indexPath.row {
         case 0:
-            // 个人信息
             let profileEditVC = ProfileEditViewController()
             navigationController?.pushViewController(profileEditVC, animated: true)
         case 1:
-            // 日历
             let calendarVC = CalendarViewController()
             navigationController?.pushViewController(calendarVC, animated: true)
         case 2:
-            // 关于我们
+            showEmergencyContactDialog()
+        case 3:
             let aboutVC = AboutViewController()
             navigationController?.pushViewController(aboutVC, animated: true)
-        case 3:
-            // 设置
+        case 4:
             let settingsVC = SettingsViewController()
             navigationController?.pushViewController(settingsVC, animated: true)
         default:
             break
         }
+    }
+    
+    private func updateStats() {
+        // 从 MMKV 获取满分天数
+        let hundredScoreDays = MMKVUtil.shared.getInt("perfect_score_count", 0)
+        hundredScoreDaysLabel.text = "\(hundredScoreDays)"
+        
+        let totalActivities = dbHelper.getAllActivityRecords().count
+        totalActivitiesLabel.text = "\(totalActivities)"
+    }
+    
+    private func showEmergencyContactDialog() {
+        let alert = UIAlertController(title: "紧急联系人", message: "请输入紧急联系人信息", preferredStyle: .alert)
+        
+        // 从 MMKV 获取现有联系人信息
+        let existingName = MMKVUtil.shared.getStringOrNull("emergency_contact_name") ?? ""
+        let existingPhone = MMKVUtil.shared.getStringOrNull("emergency_contact_phone") ?? ""
+        
+        alert.addTextField { textField in
+            textField.placeholder = "姓名"
+            textField.text = existingName
+        }
+        
+        alert.addTextField { textField in
+            textField.placeholder = "电话号码"
+            textField.keyboardType = .phonePad
+            textField.text = existingPhone
+        }
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "保存", style: .default) { _ in
+            guard let name = alert.textFields?[0].text,
+                  let phone = alert.textFields?[1].text else { return }
+            
+            // 存储到 MMKV
+            MMKVUtil.shared.putString("emergency_contact_name", name)
+            MMKVUtil.shared.putString("emergency_contact_phone", phone)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func saveImageToDocumentDirectory(image: UIImage) -> String? {
+        let documentsDirectory = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
+        let fileName = "user_photo.jpg"
+        let filePath = "\(documentsDirectory)/\(fileName)"
+        
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            do {
+                try data.write(to: URL(fileURLWithPath: filePath))
+                return filePath
+            } catch {
+                print("保存图片失败: \(error)")
+                return nil
+            }
+        }
+        return nil
+    }
+}
+
+extension ProfileViewController: MediaPickerDelegate {
+    func didPickImages(_ images: [UIImage]) {
+        if let image = images.first {
+            // 使用 AvatarHelper 处理头像
+            let healthScore = healthScoreRepository.getTodayHealthScore()
+            let processedImage = avatarHelper.processAvatar(image, healthScore: healthScore)
+            
+            avatarImageView.image = processedImage
+            
+            // 保存头像到本地
+            if let filePath = saveImageToDocumentDirectory(image: processedImage) {
+                // 存储路径到 MMKV
+                MMKVUtil.shared.putString("user_photo", filePath)
+                EventCenter.shared.post(AppConfig.EVENT_AVATAR_UPDATED, value: true)
+            }
+        }
+    }
+    
+    func didPickVideo(_ url: URL) {
+    }
+    
+    func didCancel() {
     }
 }

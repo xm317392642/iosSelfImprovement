@@ -17,6 +17,7 @@ class ProfileEditViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         setupUI()
+        loadUserData()
     }
     
     private func setupUI() {
@@ -39,7 +40,8 @@ class ProfileEditViewController: UIViewController {
         
         genderSegmentedControl.insertSegment(withTitle: "男", at: 0, animated: false)
         genderSegmentedControl.insertSegment(withTitle: "女", at: 1, animated: false)
-        genderSegmentedControl.selectedSegmentIndex = 0
+        genderSegmentedControl.insertSegment(withTitle: "其他", at: 2, animated: false)
+        genderSegmentedControl.selectedSegmentIndex = 2
         view.addSubview(genderSegmentedControl)
         
         let signatureLabel = UILabel()
@@ -99,8 +101,51 @@ class ProfileEditViewController: UIViewController {
         ])
     }
     
+    private func loadUserData() {
+        // 从 MMKV 获取用户数据
+        if let savedNickname = MMKVUtil.shared.getStringOrNull("user_nickname") {
+            nameTextField.text = savedNickname
+        }
+        
+        if let savedGender = MMKVUtil.shared.getStringOrNull("user_gender") {
+            switch savedGender {
+            case "男":
+                genderSegmentedControl.selectedSegmentIndex = 0
+            case "女":
+                genderSegmentedControl.selectedSegmentIndex = 1
+            default:
+                genderSegmentedControl.selectedSegmentIndex = 2
+            }
+        }
+        
+        if let savedSignature = MMKVUtil.shared.getStringOrNull("user_signature") {
+            signatureTextView.text = savedSignature
+        }
+    }
+    
     @objc private func saveButtonTapped() {
-        // 保存个人信息
+        // 保存个人信息到 MMKV
+        if let nickname = nameTextField.text, !nickname.isEmpty {
+            MMKVUtil.shared.putString("user_nickname", nickname)
+        }
+        
+        let genderIndex = genderSegmentedControl.selectedSegmentIndex
+        let genderValue: String
+        switch genderIndex {
+        case 0:
+            genderValue = "男"
+        case 1:
+            genderValue = "女"
+        default:
+            genderValue = "其他"
+        }
+        MMKVUtil.shared.putString("user_gender", genderValue)
+        
+        let signature = signatureTextView.text ?? ""
+        MMKVUtil.shared.putString("user_signature", signature)
+        
+        // 保存成功，返回上一页
         navigationController?.popViewController(animated: true)
     }
 }
+
